@@ -40,12 +40,26 @@ using namespace llvm;
 void SSABuilder::reset()
 {
 	// PA5: Implement
+	for (auto& def : mVarDefs)
+	{
+		delete def.second;
+	}
+	mVarDefs.clear();
+
+	for (auto& phis : mIncompletePhis)
+	{
+		delete phis.second;
+	}
+	mIncompletePhis.clear();
+
+	mSealedBlocks.clear();
 }
 
 // For a specific variable in a specific basic block, write its value
 void SSABuilder::writeVariable(Identifier* var, BasicBlock* block, Value* value)
 {
 	// PA5: Implement
+	mVarDefs[block]->insert(std::make_pair(var, value));
 }
 
 // Read the value assigned to the variable in the requested basic block
@@ -53,6 +67,15 @@ void SSABuilder::writeVariable(Identifier* var, BasicBlock* block, Value* value)
 Value* SSABuilder::readVariable(Identifier* var, BasicBlock* block)
 {
 	// PA5: Implement
+	if (mVarDefs[block]->find(var) != mVarDefs[block]->end())
+	{
+		SubMap *submap = mVarDefs[block];	
+		return (*submap)[var];
+	}
+	else
+	{
+		return readVariableRecursive(var, block);
+	}
 	
 	return nullptr;
 }
@@ -61,6 +84,12 @@ Value* SSABuilder::readVariable(Identifier* var, BasicBlock* block)
 void SSABuilder::addBlock(BasicBlock* block, bool isSealed /* = false */)
 {
 	// PA5: Implement
+	mVarDefs[block] = new SubMap();
+	mIncompletePhis[block] = new SubPHI();
+	if (isSealed)
+	{
+		sealBlock(block);
+	}
 }
 
 // This is called when a block is "sealed" which means it will not have any
@@ -68,6 +97,11 @@ void SSABuilder::addBlock(BasicBlock* block, bool isSealed /* = false */)
 void SSABuilder::sealBlock(llvm::BasicBlock* block)
 {
 	// PA5: Implement
+	for (auto& phi : *mIncompletePhis[block])
+	{
+		addPhiOperands(phi.first, phi.second);
+	}
+	mSealedBlocks.insert(block);
 }
 
 // Recursively search predecessor blocks for a variable
@@ -76,6 +110,19 @@ Value* SSABuilder::readVariableRecursive(Identifier* var, BasicBlock* block)
 	Value* retVal = nullptr;
 	
 	// PA5: Implement
+	if (mSealedBlocks.find(block) != mSealedBlocks.end()) {
+		retVal = PHINode::Create(var->llvmType(), 0, "Phi", block->getFirstNonPHI());
+		mIncompletePhis[block]->insert(std::make_pair(var, dyn_cast<PHINode>(retVal)));
+	}
+	else if (block->getSinglePredecessor() != nullptr) {
+		retVal = readVariable(var, block->getSinglePredecessor());
+	}
+	else {
+		retVal = PHINode::Create(var->llvmType(), 0, "Phi", block->getFirstNonPHI());
+		writeVariable(var, block, retVal);
+		retVal = addPhiOperands(var, dyn_cast<PHINode>(retVal));
+	}
+	writeVariable(var, block, retVal);
 	
 	return retVal;
 }
@@ -84,8 +131,12 @@ Value* SSABuilder::readVariableRecursive(Identifier* var, BasicBlock* block)
 Value* SSABuilder::addPhiOperands(Identifier* var, PHINode* phi)
 {
 	// PA5: Implement
-	
-	return nullptr;
+	for (auto pred = pred_begin(phi->getParent()); pred != pred_end(phi->getParent()); pred++)
+	{
+		Value* val = readVariable(var, *pred);
+		phi->addIncoming(val, *pred);
+	}
+	return tryRemoveTrivialPhi(phi);
 }
 
 // Removes trivial phi nodes
@@ -94,6 +145,35 @@ Value* SSABuilder::tryRemoveTrivialPhi(llvm::PHINode* phi)
 	Value* same = nullptr;
 	
 	// PA5: Implement
+	for (int i = 0; i < phi->getNumIncomingValues(); i++) {
+		Value *op = phi->getIncomingValue(i);
+		if (same == op || same == phi) {
+			continue;
+		}
+		else if (same != nullptr) {
+			return phi;
+		}
+		same = op;
+	}
+	if (same == nullptr) {
+		same = UndefValue::get(phi->getType());
+	}
+
+	phi->replaceAllUsesWith(same);
+	for (auto& blocks : mVarDefs) {
+		for (auto& defines : *blocks.second) {
+			if (defines.second == phi) {
+				defines.second = same;
+			}
+		}
+	}
+	phi->eraseFromParent();
+
+	for (auto user = phi->user_begin(); user != phi->user_end(); user++) {
+		if (PHINode *phi = dyn_cast_or_null<PHINode>(*user)) {
+			tryRemoveTrivialPhi(phi);
+		}
+	}
 	
 	return same;
 }
