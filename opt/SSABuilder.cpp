@@ -59,7 +59,8 @@ void SSABuilder::reset()
 void SSABuilder::writeVariable(Identifier* var, BasicBlock* block, Value* value)
 {
 	// PA5: Implement
-	mVarDefs[block]->insert(std::make_pair(var, value));
+	SubMap *submap = mVarDefs[block];	
+	(*submap)[var] = value;
 }
 
 // Read the value assigned to the variable in the requested basic block
@@ -76,8 +77,6 @@ Value* SSABuilder::readVariable(Identifier* var, BasicBlock* block)
 	{
 		return readVariableRecursive(var, block);
 	}
-	
-	return nullptr;
 }
 
 // This is called to add a new block to the maps
@@ -110,15 +109,26 @@ Value* SSABuilder::readVariableRecursive(Identifier* var, BasicBlock* block)
 	Value* retVal = nullptr;
 	
 	// PA5: Implement
-	if (mSealedBlocks.find(block) != mSealedBlocks.end()) {
-		retVal = PHINode::Create(var->llvmType(), 0, "Phi", block->getFirstNonPHI());
-		mIncompletePhis[block]->insert(std::make_pair(var, dyn_cast<PHINode>(retVal)));
+	if (mSealedBlocks.find(block) == mSealedBlocks.end()) {
+		if (block->getFirstNonPHI() != block->end()) {
+			retVal = PHINode::Create(var->llvmType(), 0, "Phi", block->getFirstNonPHI());
+		}
+		else {
+			retVal = PHINode::Create(var->llvmType(), 0, "Phi", block);
+		}
+		SubPHI *subphi = mIncompletePhis[block];
+		(*subphi)[var] = dyn_cast<PHINode>(retVal);
 	}
 	else if (block->getSinglePredecessor() != nullptr) {
 		retVal = readVariable(var, block->getSinglePredecessor());
 	}
 	else {
-		retVal = PHINode::Create(var->llvmType(), 0, "Phi", block->getFirstNonPHI());
+		if (block->getFirstNonPHI() != block->end()) {
+			retVal = PHINode::Create(var->llvmType(), 0, "Phi", block->getFirstNonPHI());
+		}
+		else {
+			retVal = PHINode::Create(var->llvmType(), 0, "Phi", block);
+		}
 		writeVariable(var, block, retVal);
 		retVal = addPhiOperands(var, dyn_cast<PHINode>(retVal));
 	}
@@ -147,7 +157,7 @@ Value* SSABuilder::tryRemoveTrivialPhi(llvm::PHINode* phi)
 	// PA5: Implement
 	for (int i = 0; i < phi->getNumIncomingValues(); i++) {
 		Value *op = phi->getIncomingValue(i);
-		if (same == op || same == phi) {
+		if (op == same || op == phi) {
 			continue;
 		}
 		else if (same != nullptr) {

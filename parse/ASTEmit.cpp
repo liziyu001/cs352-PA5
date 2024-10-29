@@ -137,10 +137,10 @@ AST_EMIT(ASTFunction)
 			// (Technically, iter actually has the value of the
 			// arg, not its address...but we will use the address
 			// member for this value)
-			argIdent.setAddress(iter);
+			// argIdent.setAddress(iter);
 			
 			// PA5: Write to this identifier
-			// argIdent.writeTo(ctx, iter);
+			argIdent.writeTo(ctx, iter);
 			
 			++i;
 			++iter;
@@ -634,10 +634,16 @@ AST_EMIT(ASTIfStmt)
     
     auto thenBody = BasicBlock::Create(ctx.mGlobal, "if.then", ctx.mFunc);
     auto end = BasicBlock::Create(ctx.mGlobal, "if.end", ctx.mFunc);
+	ctx.mSSA.addBlock(thenBody);
+	ctx.mSSA.addBlock(end);
+
     if (mElseStmt)
     {
         auto elseBody = BasicBlock::Create(ctx.mGlobal, "if.else", ctx.mFunc);
+		ctx.mSSA.addBlock(elseBody);
         builder.CreateCondBr(value, thenBody, elseBody);
+		ctx.mSSA.sealBlock(thenBody);
+		ctx.mSSA.sealBlock(elseBody);
 
         ctx.mBlock = elseBody;
         mElseStmt->emitIR(ctx);
@@ -646,11 +652,14 @@ AST_EMIT(ASTIfStmt)
     }
     else
         builder.CreateCondBr(value, thenBody, end);
+		ctx.mSSA.sealBlock(thenBody);
     
+
     ctx.mBlock = thenBody;
     mThenStmt->emitIR(ctx);
     IRBuilder<> builderThen(ctx.mBlock);
     builderThen.CreateBr(end);
+	ctx.mSSA.sealBlock(end);
 
     ctx.mBlock = end;
 
@@ -661,7 +670,7 @@ AST_EMIT(ASTWhileStmt)
 {
 	// PA3: Implement
     auto cond = BasicBlock::Create(ctx.mGlobal, "while.cond", ctx.mFunc);
-
+	ctx.mSSA.addBlock(cond);
     IRBuilder<> builder(ctx.mBlock);
     builder.CreateBr(cond); // unconditional branch in predecessor
 
@@ -674,11 +683,14 @@ AST_EMIT(ASTWhileStmt)
     auto body = BasicBlock::Create(ctx.mGlobal, "while.body", ctx.mFunc); // after expr's emitIR
     auto end = BasicBlock::Create(ctx.mGlobal, "while.end", ctx.mFunc);
     builderCond.CreateCondBr(value, body, end); // conditional branch in while.cond
+	ctx.mSSA.addBlock(body, true);
+	ctx.mSSA.addBlock(end, true);
 
     ctx.mBlock = body;
     this->mLoopStmt->emitIR(ctx);
     IRBuilder<> builderBody(ctx.mBlock);
     builderBody.CreateBr(cond);
+	ctx.mSSA.sealBlock(cond);
     ctx.mBlock = end;
     
 	return nullptr;
